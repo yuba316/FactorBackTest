@@ -149,16 +149,70 @@ def FactorBT(df,pct=0.1,long_short=True,weight=False,capital=1000000):
     
     return result
 
-#%% test
+#%%
 
-factor = stock[['trade_date','ts_code','close','pre_close']]
-del stock
-factor['score'] = factor['close']/factor['pre_close']-1
-factor = factor[factor['trade_date']>='20200101']
-factor.reset_index(drop=True,inplace=True)
+def DailyProfit_2(temp,last,capital,change=True):
+    
+    # input:
+    # last[DataFrame]: [ts_code,last_close,last_invest,last_volume]
+    
+    df = copy.deepcopy(temp)
+    df = pd.merge(df,last,how='left',on='ts_code')
+    df.fillna(0,inplace=True)
+    profit = ((df['close']-df['last_close'])*df['last_invest']*df['last_volume']).sum()
+    strategy = capital+profit
+    if change:
+        capital = capital+profit
+        total = (df['close']*df['weight']).sum()
+        df['volume'] = (df['weight']*capital/total).apply(int)
+        last = df[['ts_code','close','invest','volume']]
+        last.rename(columns={'close':'last_close','invest':'last_invest','volume':'last_volume'},inplace=True)
+    
+    return strategy,capital,last
 
 #%%
 
+def FactorBT_2(df,freq=5,pct=0.1,long_short=True,weight=False,capital=1000000):
+    
+    factor = copy.deepcopy(df)
+    factor['invest'],factor['weight'] = 0,0
+    trade_date = list(np.sort(factor['trade_date'].unique()))
+    n = len(trade_date)
+    trade_date = [trade_date[i] for i in range(n) if i%freq==0]
+    n = len(trade_date)
+    for i in range(n):
+        temp = factor[factor['trade_date']==trade_date[i]]
+        df = RankInvest(temp,pct,long_short,weight)
+        index = factor[factor['trade_date']==trade_date[i]].index
+        factor.loc[index,'invest'],factor.loc[index,'weight'] = list(df['invest']),list(df['weight'])
+    factor['change'] = factor['trade_date'].apply(lambda x: x in trade_date)
+    
+    temp = factor[factor['trade_date']==trade_date[0]]
+    total = (temp['close']*temp['weight']).sum()
+    temp['volume'] = (temp['weight']*capital/total).apply(int)
+    last = temp[['ts_code','close','invest','volume']]
+    last.rename(columns={'close':'last_close','invest':'last_invest','volume':'last_volume'},inplace=True)
+    strategy,capital = [capital],[capital]
+    trade_date = list(np.sort(factor['trade_date'].unique()))
+    n = len(trade_date)
+    for i in range(1,n,1):
+        temp = factor[factor['trade_date']==trade_date[i]]
+        change = temp['change'].iloc[0]
+        stg,cpt,last = DailyProfit_2(temp,last,capital[-1],change)
+        strategy.append(stg)
+        capital.append(cpt)
+        if capital[-1]<=0:
+            break
+    
+    n = len(strategy)
+    result = pd.DataFrame({'trade_date':trade_date[:n],'strategy':strategy,'capital':capital})
+    result['trade_date'] = result['trade_date'].apply(lambda x: datetime.datetime.strptime(x,'%Y%m%d'))
+    result['strategy_pct'] = result['strategy']/strategy[0]-1
+    
+    return result
+
+#%%
+'''
 result = FactorBT(factor,0.1,True,True)
 index = pro.index_daily(ts_code='399300.SZ',start_date='20200101', end_date='20200525',fields='trade_date,close')
 index.sort_values(by='trade_date',inplace=True)
@@ -171,12 +225,12 @@ plt.plot(result['trade_date'],result['strategy_pct'],label='因子选股策略')
 plt.plot(index['trade_date'],index['index_pct'],label='沪深300指数')
 plt.xticks(rotation=60)
 plt.legend(loc='upper left')
-
+'''
 #%%
 '''
 factor = stock[stock['trade_date']>='20120101'][['trade_date','ts_code','close']]
 del stock
-factor['last_month_close'] = factor.groupby(['ts_code'])['close'].apply(lambda x: x.shift(21))
+factor['last_month_close'] = factor.groupby(['ts_code'])['close'].shift(21)
 factor.dropna(axis=0,inplace=True)
 factor['score'] = factor['close']/factor['last_month_close']-1
 factor.reset_index(drop=True,inplace=True)
@@ -187,4 +241,25 @@ factor.reset_index(drop=True,inplace=True)
 factor.drop(['last_month_close','month'],axis=1,inplace=True)
 result = FactorBT(factor)
 plt.plot(result['trade_date'],result['strategy_pct'])
+'''
+
+#%% test
+'''
+factor = stock[['trade_date','ts_code','close','pre_close']]
+del stock
+factor['score'] = factor['close']/factor['pre_close']-1
+factor.drop(['pre_close'],axis=1,inplace=True)
+factor.reset_index(drop=True,inplace=True)
+result = FactorBT_2(factor)
+index = pro.index_daily(ts_code='399300.SZ',start_date='20070101', end_date='20200525',fields='trade_date,close')
+index.sort_values(by='trade_date',inplace=True)
+index.reset_index(drop=True,inplace=True)
+index['trade_date'] = index['trade_date'].apply(lambda x: datetime.datetime.strptime(x,'%Y%m%d'))
+index['index_pct'] = index['close']/index['close'].iloc[0]-1
+plt.figure(figsize=(12,4))
+plt.title('回测结果')
+plt.plot(result['trade_date'],result['strategy_pct'],label='因子选股策略')
+plt.plot(index['trade_date'],index['index_pct'],label='沪深300指数')
+plt.xticks(rotation=60)
+plt.legend(loc='upper left')
 '''
