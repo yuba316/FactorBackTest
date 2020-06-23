@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon Jun 15 09:35:29 2020
+Created on Mon Jun 22 11:01:17 2020
 
 @author: yuba316
 """
@@ -16,60 +16,82 @@ pro = ts.pro_api('da949c80ceb5513dcc45b50ba0b0dec1bc518132101bec0dfb19da56')
 
 stock = pd.read_csv(r"D:\work\back_test_system\DataBase\Stock\Stock.csv")
 stock['trade_date'] = stock['trade_date'].apply(str)
-factor = stock[['trade_date','ts_code','close','pre_close']]
-del stock
+factor = stock[stock['trade_date']>='20200101'][['trade_date','ts_code','close','pre_close']]
 factor['score'] = factor['close']/factor['pre_close']-1
-factor.drop(['pre_close'],axis=1,inplace=True)
-factor.reset_index(drop=True,inplace=True)
 
 #%%
 
-def FactorTest(df,freq=5,pct=0.1):
+def FactorBT(df,freq=5,pct=0.1,long_short=True,weight=False,capital=1000000):
     
-    factor = copy.deepcopy(df)
-    trade_date = list(np.sort(factor['trade_date'].unique()))
+    stock = copy.deepcopy(df)
+    trade_date = list(np.sort(stock['trade_date'].unique()))
     n = len(trade_date)
-    trade_date = [trade_date[i] for i in range(0,n,5)]
-    factor = factor[factor['trade_date'].apply(lambda x: x in trade_date)]
+    trade_date = [trade_date[i] for i in range(0,n,freq)]
+    factor = copy.deepcopy(stock[stock['trade_date'].apply(lambda x: x in trade_date)])
     
+    factor['rank'] = factor.groupby('trade_date')['score'].rank(method='min',na_option='keep',ascending=False)
+    factor['invest'] = factor.groupby('trade_date')['rank'].apply(lambda x: x<=math.floor(x.count()*pct)).apply(int)
+    if long_short:
+        factor['invest'] = factor['invest']-factor.groupby('trade_date')['rank'].apply(lambda x: x>=math.ceil(x.count()*(1-pct))).apply(int)
+    if weight:
+        factor['weight'] = factor[factor['invest']==1].groupby('trade_date')['rank'].apply(lambda x: (x.count()-x+1)/x.sum())
+        factor['weight'].fillna(0,inplace=True)
+        if long_short:
+            factor['weight_1'] = factor[factor['invest']==-1].groupby('trade_date')['rank'].apply(lambda x: (x.count()-(x.max()-x))/((1+x.count())*x.count()/2))
+            factor['weight_1'].fillna(0,inplace=True)
+            factor['weight'] = factor['weight']+factor['weight_1']
+            factor.drop(['weight_1'],axis=1,inplace=True)
+    else:
+        factor['weight'] = factor[factor['invest']==1].groupby('trade_date')['invest'].apply(lambda x: x/x.count())
+        factor['weight'].fillna(0,inplace=True)
+        if long_short:
+            factor['weight_1'] = factor[factor['invest']==-1].groupby('trade_date')['invest'].apply(lambda x: -1*x/x.count())
+            factor['weight_1'].fillna(0,inplace=True)
+            factor['weight'] = factor['weight']+factor['weight_1']
+            factor.drop(['weight_1'],axis=1,inplace=True)
+    
+    Profit,Capital,Volume = [0],[capital],pd.Series([])
     factor['next_close'] = factor.groupby('ts_code')['close'].shift(-1)
-    factor['profit'] = factor['next_close']/factor['close']-1
-    factor['rank'] = factor.groupby('trade_date')['score'].rank(method='min',na_option='keep',ascending=True)
-    factor['p_rank'] = factor.groupby('trade_date')['profit'].rank(method='min',na_option='keep',ascending=True)
-    factor.dropna(inplace=True)
+    for i in trade_date:
+        temp = copy.deepcopy(factor[factor['trade_date']==i])
+        temp['volume'] = ((Capital[-1]*temp['weight'])/(temp['weight']*temp['close']).sum()).apply(int)
+        Profit.append((temp['invest']*(temp['next_close']-temp['close'])*temp['volume']).sum())
+        Capital.append(Capital[-1]+Profit[-1])
+        Volume = Volume.append(temp['volume'])
+        if Capital[-1]<=0:
+            break
+    factor['origin_close'],factor['volume'] = factor['close'],Volume
+    factor['volume'].fillna(0,inplace=True)
+    n = min(len(Capital),len(trade_date))
+    result = pd.DataFrame({'trade_date':trade_date[:n],'profit':Profit[:n],'capital':Capital[:n]})
     
-    result = {}
-    temp = factor.groupby('trade_date')[['score','profit']].corr()
-    temp.index.names = ['trade_date','key']
-    result['IC'] = list(temp.query('key==\'profit\'')['score'])
-    temp = factor.groupby('trade_date')[['rank','p_rank']].corr()
-    temp.index.names = ['trade_date','key']
-    result['Rank_IC'] = list(temp.query('key==\'p_rank\'')['rank'])
+    stock[['invest','origin_close','volume']] = factor[['invest','origin_close','volume']]
+    stock[['invest','origin_close','volume']] = stock.groupby('ts_code')[['invest','origin_close','volume']].fillna(method='ffill')
+    stock['profit'] = stock['invest']*(stock['close']-stock['origin_close'])*stock['volume']
+    strategy = stock.groupby('trade_date')['profit'].sum()
+    strategy = pd.DataFrame({'trade_date':strategy.index,'profit':list(strategy)})
+    result = pd.merge(strategy,result,how='left',on='trade_date')
+    result['profit_y'].fillna(0,inplace=True)
+    result['profit'] = result['profit_x']+result['profit_y']
+    result['capital'].fillna(method='ffill',inplace=True)
+    result['strategy'] = result['capital']+result['profit_x']
+    result.drop(['profit_x','profit_y'],axis=1,inplace=True)
+    result['strategy_pct'] = result['strategy']/result['strategy'].iloc[0]-1
+    result['trade_date'] = result['trade_date'].apply(lambda x: datetime.datetime.strptime(x,'%Y%m%d'))
     
-    temp = factor.groupby('trade_date')['ts_code'].count()
-    temp = pd.DataFrame({'trade_date':temp.index,'group':list(temp)})
-    factor = pd.merge(factor,temp,how='left',on='trade_date')
-    factor['long'] = factor['rank']>(1-pct)*factor['group']
-    factor['short'] = factor['rank']<pct*factor['group']
-    temp = factor[factor['long']].groupby('trade_date')[['score','profit']].corr()
-    temp.index.names = ['trade_date','key']
-    result['long_IC'] = list(temp.query('key==\'profit\'')['score'])
-    temp = factor[factor['long']].groupby('trade_date')[['rank','p_rank']].corr()
-    temp.index.names = ['trade_date','key']
-    result['long_Rank_IC'] = list(temp.query('key==\'p_rank\'')['rank'])
-    result['long_short_profit'] = list(factor[factor['long']].groupby('trade_date')['profit'].mean()-\
-                                       factor[factor['short']].groupby('trade_date')['profit'].mean())
-    
-    result = pd.DataFrame(result)
-    res = result.mean()
-    n = len(result)
-    res['IR'] = result['IC'].mean()/result['IC'].std()*np.sqrt(252/n)
-    res['Rank_IR'] = result['Rank_IC'].mean()/result['Rank_IC'].std()*np.sqrt(252/n)
-    res['long_IR'] = result['long_IC'].mean()/result['long_IC'].std()*np.sqrt(252/n)
-    res['long_Rank_IR'] = result['long_Rank_IC'].mean()/result['long_Rank_IC'].std()*np.sqrt(252/n)
-    
-    return res
+    return result
 
-#%% test
+#%%
 
-result = FactorTest(factor,5,0.1)
+result = FactorBT(factor,5,0.1,False,False)
+index = pro.index_daily(ts_code='399300.SZ',start_date='20200101', end_date='20200525',fields='trade_date,close')
+index.sort_values(by='trade_date',inplace=True)
+index.reset_index(drop=True,inplace=True)
+index['trade_date'] = index['trade_date'].apply(lambda x: datetime.datetime.strptime(x,'%Y%m%d'))
+index['index_pct'] = index['close']/index['close'].iloc[0]-1
+plt.figure(figsize=(12,4))
+plt.title('回测结果')
+plt.plot(result['trade_date'],result['strategy_pct'],label='因子选股策略')
+plt.plot(index['trade_date'],index['index_pct'],label='沪深300指数')
+plt.xticks(rotation=60)
+plt.legend(loc='upper left')
