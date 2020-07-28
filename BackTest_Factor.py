@@ -16,6 +16,8 @@ pro = ts.pro_api('da949c80ceb5513dcc45b50ba0b0dec1bc518132101bec0dfb19da56')
 
 stock = pd.read_csv(r"D:\work\back_test_system\DataBase\Stock\Stock.csv")
 stock['trade_date'] = stock['trade_date'].apply(str)
+factor = stock[stock['trade_date']>='20200101'][['trade_date','ts_code','close','pre_close']]
+factor['score'] = factor['close']/factor['pre_close']-1
 
 #%%
 
@@ -211,8 +213,8 @@ def FactorBT_2(df,freq=5,pct=0.1,long_short=True,weight=False,capital=1000000):
     
     return result
 
-#%%
-'''
+#%% test
+
 result = FactorBT(factor,0.1,True,True)
 index = pro.index_daily(ts_code='399300.SZ',start_date='20200101', end_date='20200525',fields='trade_date,close')
 index.sort_values(by='trade_date',inplace=True)
@@ -225,41 +227,13 @@ plt.plot(result['trade_date'],result['strategy_pct'],label='因子选股策略')
 plt.plot(index['trade_date'],index['index_pct'],label='沪深300指数')
 plt.xticks(rotation=60)
 plt.legend(loc='upper left')
-'''
-#%%
-'''
-factor = stock[stock['trade_date']>='20120101'][['trade_date','ts_code','close']]
-del stock
-factor['last_month_close'] = factor.groupby(['ts_code'])['close'].shift(21)
-factor.dropna(axis=0,inplace=True)
-factor['score'] = factor['close']/factor['last_month_close']-1
-factor.reset_index(drop=True,inplace=True)
-factor['month'] = factor['trade_date'].apply(lambda x: int(int(x)/100))
-month = list(factor.groupby(['month']).first()['trade_date'])
-factor = factor[factor['trade_date'].apply(lambda x: x in month)]
-factor.reset_index(drop=True,inplace=True)
-factor.drop(['last_month_close','month'],axis=1,inplace=True)
-result = FactorBT(factor)
-plt.plot(result['trade_date'],result['strategy_pct'])
-'''
 
 #%% test
-'''
-factor = stock[['trade_date','ts_code','close','pre_close']]
-del stock
-factor['score'] = factor['close']/factor['pre_close']-1
-factor.drop(['pre_close'],axis=1,inplace=True)
-factor.reset_index(drop=True,inplace=True)
-result = FactorBT_2(factor)
-index = pro.index_daily(ts_code='399300.SZ',start_date='20070101', end_date='20200525',fields='trade_date,close')
-index.sort_values(by='trade_date',inplace=True)
-index.reset_index(drop=True,inplace=True)
-index['trade_date'] = index['trade_date'].apply(lambda x: datetime.datetime.strptime(x,'%Y%m%d'))
-index['index_pct'] = index['close']/index['close'].iloc[0]-1
+
+result = FactorBT_2(factor,5,0.1,True,True)
 plt.figure(figsize=(12,4))
 plt.title('回测结果')
 plt.plot(result['trade_date'],result['strategy_pct'],label='因子选股策略')
 plt.plot(index['trade_date'],index['index_pct'],label='沪深300指数')
 plt.xticks(rotation=60)
 plt.legend(loc='upper left')
-'''

@@ -5,10 +5,12 @@ Created on Fri Jun 19 15:59:46 2020
 @author: yuba316
 """
 
+import copy
 import math
 import numpy as np
 import pandas as pd
 from scipy.stats import rankdata
+from pyfinance.ols import PandasRollingOLS
 stock = pd.read_csv(r"D:\work\back_test_system\DataBase\Stock\Stock.csv")
 stock['trade_date'] = stock['trade_date'].apply(str)
 factor = stock[stock['trade_date']>='20200101']
@@ -111,7 +113,7 @@ def SMA(factor,x,num,name):
 
 def WMA(factor,x,num,name):
     day = np.arange(1,num+1,1)
-    temp = factor.groupby('ts_code')[x].rolling(num).apply(lambda x: (x*day/day.sum()).mean(),raw=True)
+    temp = factor.groupby('ts_code')[x].rolling(num).apply(lambda x: (x*day/day.sum()).sum(),raw=True)
     temp.index = temp.index.droplevel()
     factor[name] = temp
     return factor
@@ -213,6 +215,43 @@ def delta_pct(factor,x,num,name):
     delay = factor.groupby('ts_code')[x].shift(num)
     temp = (factor[x]-delay)/delay
     factor[name] = temp
+    return factor
+
+def RegAlpha(factor,x,y,num,name):
+    temp = copy.deepcopy(factor[['trade_date','ts_code',x,y]])
+    temp.sort_values(by=['ts_code','trade_date'],inplace=True)
+    res = PandasRollingOLS(temp[x],temp[y],num)
+    factor[name] = res.alpha
+    index = factor.groupby('ts_code').head(num-1).index
+    factor.loc[index,name] = np.nan
+    return factor
+
+def RegBeta(factor,x,y,num,name):
+    temp = copy.deepcopy(factor[['trade_date','ts_code',x,y]])
+    temp.sort_values(by=['ts_code','trade_date'],inplace=True)
+    res = PandasRollingOLS(temp[x],temp[y],num)
+    factor[name] = res.beta
+    index = factor.groupby('ts_code').head(num-1).index
+    factor.loc[index,name] = np.nan
+    return factor
+
+def RegResi(factor,x,y,num,name):
+    temp = copy.deepcopy(factor[['trade_date','ts_code',x,y]])
+    temp.sort_values(by=['ts_code','trade_date'],inplace=True)
+    res = PandasRollingOLS(temp[x],temp[y],num)
+    temp['alpha'],temp['beta'] = res.beta,res.beta
+    temp['resi'] = temp[y]-temp['alpha']-temp[x]*temp['beta']
+    factor[name] = temp['resi']
+    index = factor.groupby('ts_code').head(num-1).index
+    factor.loc[index,name] = np.nan
+    return factor
+
+def compareMax(factor,x,y,name):
+    factor[name] = factor.apply(lambda arr: arr[x] if arr[x]>=arr[y] else arr[y],axis=1)
+    return factor
+
+def compareMin(factor,x,y,name):
+    factor[name] = factor.apply(lambda arr: arr[x] if arr[x]<arr[y] else arr[y],axis=1)
     return factor
 
 #%%
