@@ -11,10 +11,11 @@ import numpy as np
 import pandas as pd
 from scipy.stats import rankdata
 from pyfinance.ols import PandasRollingOLS
+'''
 stock = pd.read_csv(r"D:\work\back_test_system\DataBase\Stock\Stock.csv")
 stock['trade_date'] = stock['trade_date'].apply(str)
 factor = stock[stock['trade_date']>='20200101']
-
+'''
 #%%
 
 def plus(factor,x,y,name):
@@ -247,11 +248,15 @@ def RegResi(factor,x,y,num,name):
     return factor
 
 def compareMax(factor,x,y,name):
-    factor[name] = factor.apply(lambda arr: arr[x] if arr[x]>=arr[y] else arr[y],axis=1)
+    factor[name] = factor[[x,y]].max(axis=1)
     return factor
 
 def compareMin(factor,x,y,name):
-    factor[name] = factor.apply(lambda arr: arr[x] if arr[x]<arr[y] else arr[y],axis=1)
+    factor[name] = factor[[x,y]].min(axis=1)
+    return factor
+
+def compareIf(factor,z,x,y,name):
+    factor[name] = factor[x]*(factor[z]>0)+factor[y]*(factor[z]<=0)
     return factor
 
 #%%

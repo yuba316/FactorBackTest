@@ -13,7 +13,7 @@ import datetime
 import matplotlib.pyplot as plt
 import tushare as ts
 pro = ts.pro_api('da949c80ceb5513dcc45b50ba0b0dec1bc518132101bec0dfb19da56')
-
+'''
 stock = pd.read_csv(r"D:\work\back_test_system\DataBase\Stock\Stock.csv")
 stock['trade_date'] = stock['trade_date'].apply(str)
 factor = stock[['trade_date','ts_code','close','pre_close']]
@@ -21,7 +21,7 @@ del stock
 factor['score'] = factor['close']/factor['pre_close']-1
 factor.drop(['pre_close'],axis=1,inplace=True)
 factor.reset_index(drop=True,inplace=True)
-
+'''
 #%%
 
 def FactorTest(df,freq=5,pct=0.1):
@@ -29,7 +29,7 @@ def FactorTest(df,freq=5,pct=0.1):
     factor = copy.deepcopy(df)
     trade_date = list(np.sort(factor['trade_date'].unique()))
     n = len(trade_date)
-    trade_date = [trade_date[i] for i in range(0,n,5)]
+    trade_date = [trade_date[i] for i in range(0,n,freq)]
     factor = factor[factor['trade_date'].apply(lambda x: x in trade_date)]
     
     factor['next_close'] = factor.groupby('ts_code')['close'].shift(-1)
@@ -59,6 +59,15 @@ def FactorTest(df,freq=5,pct=0.1):
     result['long_Rank_IC'] = list(temp.query('key==\'p_rank\'')['rank'])
     result['long_short_profit'] = list(factor[factor['long']].groupby('trade_date')['profit'].mean()-\
                                        factor[factor['short']].groupby('trade_date')['profit'].mean())
+    index = list(result.keys())
+    n = []
+    for i in index:
+        n.append(len(result[i]))
+    n = max(n)
+    for i in index:
+        m = len(result[i])
+        if m<n:
+            result[i] = list(np.repeat(np.nan,n-m))+result[i]
     
     result = pd.DataFrame(result)
     res = result.mean()
@@ -71,5 +80,6 @@ def FactorTest(df,freq=5,pct=0.1):
     return res
 
 #%% test
-
+'''
 result = FactorTest(factor,5,0.1)
+'''
