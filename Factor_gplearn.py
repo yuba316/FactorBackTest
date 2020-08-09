@@ -58,19 +58,19 @@ def _exp(data): # new
 def _square(data): # new
     return np.square(data)
 
-def _ts_min(data,window):
-    window = window[0]
-    if type(window)!=int:
-        return np.zeros(len(data))
-    value = np.array(pd.Series(data.flatten()).rolling(window).min().tolist())
-    value = np.nan_to_num(value)
-    return value
-
 def _ts_max(data,window):
     window = window[0]
     if type(window)!=int:
         return np.zeros(len(data))
     value = np.array(pd.Series(data.flatten()).rolling(window).max().tolist())
+    value = np.nan_to_num(value)
+    return value
+
+def _ts_min(data,window):
+    window = window[0]
+    if type(window)!=int:
+        return np.zeros(len(data))
+    value = np.array(pd.Series(data.flatten()).rolling(window).min().tolist())
     value = np.nan_to_num(value)
     return value
 
@@ -292,8 +292,8 @@ def _scale(data):
 
 exp = make_function(function=_exp, name='exp', arity=1)
 square = make_function(function=_square, name='square', arity=1)
-ts_min = make_function(function=_ts_min, name='ts_min', arity=2)
 ts_max = make_function(function=_ts_max, name='ts_max', arity=2)
+ts_min = make_function(function=_ts_min, name='ts_min', arity=2)
 ts_mid = make_function(function=_ts_mid, name='ts_mid', arity=2)
 sma = make_function(function=_sma, name='sma', arity=2)
 wma = make_function(function=_wma, name='wma', arity=2)
