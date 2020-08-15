@@ -32,10 +32,8 @@ fields = ['open', 'close', 'low', 'high', 'volume', 'avg', 'pre_close']
 stock_price = jq.get_price(stock_list, start_date=start_date, end_date=end_date, fq=None, fields=fields)
 stock_price = stock_price.sort_values(by=['code','time']).reset_index(drop=True)
 stock_price['time'] = stock_price['time'].apply(lambda x: datetime.datetime.strftime(x,'%Y%m%d'))
-stock_price['profit'] = stock_price.groupby('code')['close'].shift(-20)/stock_price['close']-1
 stock_price['5'],stock_price['10'],stock_price['15'],stock_price['20'],stock_price['30'],\
     stock_price['60'],stock_price['100'],stock_price['120'],stock_price['200'] = 5,10,15,20,30,60,100,120,200
-fields = fields+['5','10','15','20','30','60','100','120','200']
 '''
 trade_date_list = jq.get_trade_days(start_date, end_date)
 trade_date_list = [datetime.datetime.strftime(i,'%Y%m%d') for i in trade_date_list]
@@ -52,15 +50,36 @@ stock_quote = {}
 for i in fields:
     stock_quote[i] = SpreadQuote(stock_price, i, trade_date_list, stock_list)
 '''
-#%% 2. 算子自定义
+#%% 2. 标签设计
+
+# 这是一个很奇怪的过程，如果你的标签设计得不好，你的模型就会训练成奇怪的样子
+# 1. 这里标签采用按照open、close等几个基础行情作为因子得分计算出来的RankIC值的加权平均
+# 2. 很明显这么做是不行的，我们还是使用未来收益率作为标签就行
+
+stock_price['profit'] = stock_price.groupby('code')['close'].shift(-20)/stock_price['close']-1
+'''
+target_fields = []
+for i in fields:
+    df = stock_price[['time','code',i,'profit']].copy()
+    df['rank'] = df.groupby('time')[i].rank(method='min',na_option='keep',ascending=True)
+    df['p_rank'] = df.groupby('time')['profit'].rank(method='min',na_option='keep',ascending=True)
+    res = df.groupby('time')[['rank','p_rank']].corr()
+    res.index.names = ['time','key']
+    res = res.query('key==\'p_rank\'')['rank']
+    res = res.reset_index().drop('key',axis=1)
+    stock_price = pd.merge(stock_price,res,how='left',on='time')
+    stock_price.rename(columns={'rank':i+'_rankIC'},inplace=True)
+    target_fields.append(i+'_rankIC')
+'''
+#%% 3. 算子自定义
 
 # 发现gplearn支持fit的数据集只能是二维的array-like矩阵，所以还是只能用stock_price再结合groupby去自定义函数
 # 但是由于输入的array本身没有groupby的功能，所以要在函数里自行添加
 
 stock_price.fillna(0,inplace=True)
 trade_date,stock_code,target = stock_price['time'],stock_price['code'],stock_price['profit'].values
-stock_price.drop(['time','code','profit'],axis=1,inplace=True)
-stock_price = stock_price.values
+fields = fields+['5','10','15','20','30','60','100','120','200']
+stock_price = stock_price[fields].values
 
 init_function = ['add', 'sub', 'mul', 'div', 'sqrt', 'log', 'abs', 'neg', 'inv', 'max', 'min', 'sin', 'cos', 'tan']
 
@@ -456,39 +475,29 @@ user_function = [exp, square, ts_max, ts_min, ts_mid, ts_mean, ts_wma, ts_std, t
                  ts_beta, ts_resi, sec_max, sec_min, sec_compareIf, sec_rank, sec_norm, \
                  sec_normMaxMin, sec_one, sec_demean]
 
-#%% 3. 适应度定义
+#%% 4. 适应度定义
 
-# 事实上y_pred反映的就是个股的因子得分情况，将其排名与y（收益率）做相关系数的计算就可以得到RankIC值
 def _rankIC_metric(y,y_pred,sample_weight):
-    df = pd.DataFrame({'profit':y,'score':y_pred})
-    df['time'] = trade_date
-    df['code'] = stock_code
-    df['rank'] = df.groupby('time')['score'].rank(method='min',na_option='keep',ascending=True)
-    df['p_rank'] = df.groupby('time')['profit'].rank(method='min',na_option='keep',ascending=True)
-    res = df.groupby('time')[['rank','p_rank']].corr()
-    res.index.names = ['time','key']
-    res = np.mean(res.query('key==\'p_rank\'')['rank'])
-    
-    return res
+    return abs(np.mean(np.nan_to_num(y)))
 rankIC_metric = make_fitness(function=_rankIC_metric, greater_is_better=True)
 
-#%% 4. 开始遗传进化
+#%% 5. 开始遗传进化
 
-generations = 2 # 进化世代数
-population_size = 500 # 每一代中的公式数量
-tournament_size = 10 # 每一代中被随机选中计算适应度的公式数
+generations = 3 # 进化世代数
+population_size = 1000 # 每一代中的公式数量
+tournament_size = 200 # 每一代中被随机选中计算适应度的公式数
 const_range = (0.0,10.0)
 function_set = init_function+user_function # 函数算子
 metric = rankIC_metric # 目标函数作为适应度
-random_state = 2008091 # 设置随机种子
+random_state = 200812 # 设置随机种子
 factor_gp = SymbolicTransformer(feature_names=fields, 
                                 function_set=function_set, 
                                 generations=generations, 
-                                metric=metric, 
                                 population_size=population_size, 
                                 tournament_size=tournament_size, 
                                 const_range=const_range, 
-                                random_state=random_state)
+                                random_state=random_state
+                                )#, metric=metric)
 factor_gp.fit(stock_price, target)
 
 with open(r'D:\work\back_test_system\FactorBackTest\gp_model.pkl', 'wb') as f:
